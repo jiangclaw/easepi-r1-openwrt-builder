@@ -38,13 +38,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 120
     env:
       OPENWRT_TAG: ${{ github.event.inputs.openwrt_tag || 'v25.12.0' }}
       OPENCLASH_REF: ${{ github.event.inputs.openclash_ref || 'master' }}
       ROOTFS_PARTSIZE: ${{ github.event.inputs.rootfs_partsize || '1024' }}
       EXTRA_PACKAGES: ${{ github.event.inputs.extra_packages || '' }}
       REMOVE_PACKAGES: ${{ github.event.inputs.remove_packages || '' }}
+      PROFILE: linkease_easepi-r1
       TZ: Asia/Shanghai
     steps:
       - name: Checkout repository
@@ -62,32 +63,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential bzip2 ccache clang curl file flex g++ gawk gcc-multilib \
-            gettext git libelf-dev libncurses-dev libssl-dev patch python3 \
-            python3-pyelftools python3-setuptools rsync subversion swig tar unzip \
-            wget xsltproc zlib1g-dev zstd
+            curl file git make rsync tar unzip wget zstd
 
-      - name: Restore dl cache
-        uses: actions/cache@v4
-        with:
-          path: openwrt/dl
-          key: ${{ runner.os }}-openwrt-dl-${{ env.OPENWRT_TAG }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-dl-
-
-      - name: Clone OpenWrt source
+      - name: Download ImageBuilder
         run: |
-          git clone --depth 1 --branch "${OPENWRT_TAG}" https://git.openwrt.org/openwrt/openwrt.git openwrt
-
-      - name: Update and install feeds
-        working-directory: openwrt
-        run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          OPENWRT_VERSION="${OPENWRT_TAG#v}"
+          curl -fL "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/rockchip/armv8/openwrt-imagebuilder-${OPENWRT_VERSION}-rockchip-armv8.Linux-x86_64.tar.zst" -o imagebuilder.tar.zst
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst
+          mv "openwrt-imagebuilder-${OPENWRT_VERSION}-rockchip-armv8.Linux-x86_64" imagebuilder
 
       - name: Download OpenClash APK
         run: |
-          mkdir -p openwrt/files/root
+          mkdir -p imagebuilder/files/root
           rm -rf /tmp/openclash-package
           git clone --depth 1 --branch package https://github.com/vernesong/OpenClash.git /tmp/openclash-package
           case "${OPENCLASH_REF}" in
@@ -95,43 +82,34 @@ jobs:
             *) apk_source="$(find /tmp/openclash-package/master -maxdepth 1 -type f -name '*.apk' | head -n 1)" ;;
           esac
           test -n "${apk_source}"
-          cp "${apk_source}" openwrt/files/root/luci-app-openclash.apk
-          ls -lh openwrt/files/root/luci-app-openclash.apk
+          cp "${apk_source}" imagebuilder/files/root/luci-app-openclash.apk
+          ls -lh imagebuilder/files/root/luci-app-openclash.apk
 
       - name: Copy custom files
         run: |
-          mkdir -p openwrt/files
-          rsync -a files/ openwrt/files/
-
-      - name: Prepare .config
-        run: |
-          chmod +x scripts/prepare_config.sh
-          ./scripts/prepare_config.sh openwrt config/easepi-r1.seed
-
-      - name: Expand defconfig
-        working-directory: openwrt
-        run: |
-          make defconfig
-          grep -E 'CONFIG_TARGET_|CONFIG_PACKAGE_luci-app-openclash|CONFIG_TARGET_ROOTFS_PARTSIZE' .config
-
-      - name: Download sources
-        working-directory: openwrt
-        run: |
-          make download -j"$(nproc)"
+          rsync -a files/ imagebuilder/files/
 
       - name: Build firmware
-        working-directory: openwrt
         run: |
           set -o pipefail
-          make -j2 V=s 2>&1 | tee "${GITHUB_WORKSPACE}/build.log"
+          remove_package_args=""
+          for pkg in ${REMOVE_PACKAGES}; do
+            remove_package_args="${remove_package_args} -${pkg}"
+          done
+          OPENWRT_VERSION="${OPENWRT_TAG#v}"
+          cd imagebuilder
+          make image PROFILE="${PROFILE}" ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE}" \
+            PACKAGES="luci-ssl luci-compat dnsmasq-full -dnsmasq bash curl ca-bundle ip-full ruby ruby-yaml unzip kmod-tun kmod-inet-diag kmod-nft-tproxy ${EXTRA_PACKAGES}${remove_package_args}" \
+            FILES="${GITHUB_WORKSPACE}/imagebuilder/files" \
+            2>&1 | tee "${GITHUB_WORKSPACE}/build.log"
 
       - name: Collect artifacts
         if: always()
         run: |
           mkdir -p artifacts
-          cp openwrt/.config artifacts/ || true
+          cp imagebuilder/.config artifacts/ || true
           cp build.log artifacts/ || true
-          find openwrt/bin/targets/rockchip/armv8 -maxdepth 1 -type f \
+          find imagebuilder/bin/targets/rockchip/armv8 -maxdepth 1 -type f \
             \( -name '*.img.gz' -o -name '*.itb' -o -name '*.manifest' -o -name 'sha256sums' -o -name 'profiles.json' -o -name 'config.buildinfo' -o -name 'feeds.buildinfo' -o -name 'version.buildinfo' \) \
             -exec cp {} artifacts/ \; || true
           if ls artifacts/* >/dev/null 2>&1; then
