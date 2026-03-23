@@ -114,21 +114,27 @@ jobs:
       - name: Build firmware
         working-directory: openwrt
         run: |
-          make -j"$(nproc)" || make -j1 V=s
+          set -o pipefail
+          make -j2 V=s 2>&1 | tee "${GITHUB_WORKSPACE}/build.log"
 
       - name: Collect artifacts
+        if: always()
         run: |
           mkdir -p artifacts
-          cp openwrt/.config artifacts/
+          cp openwrt/.config artifacts/ || true
+          cp build.log artifacts/ || true
           find openwrt/bin/targets/rockchip/armv8 -maxdepth 1 -type f \
             \( -name '*.img.gz' -o -name '*.itb' -o -name '*.manifest' -o -name 'sha256sums' -o -name 'profiles.json' -o -name 'config.buildinfo' -o -name 'feeds.buildinfo' -o -name 'version.buildinfo' \) \
-            -exec cp {} artifacts/ \;
-          sha256sum artifacts/* > artifacts/sha256sums
+            -exec cp {} artifacts/ \; || true
+          if ls artifacts/* >/dev/null 2>&1; then
+            sha256sum artifacts/* > artifacts/sha256sums
+          fi
           ls -lah artifacts
 
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: easepi-r1-openwrt-${{ env.OPENWRT_TAG }}
           path: artifacts/
-          if-no-files-found: error
+          if-no-files-found: warn
