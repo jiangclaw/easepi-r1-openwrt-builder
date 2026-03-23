@@ -63,7 +63,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential bzip2 ccache clang curl file flex g++ gawk gcc-multilib \
-            gettext git libelf-dev libncurses-dev libssl-dev patch python3 \
+            gettext git jq libelf-dev libncurses-dev libssl-dev patch python3 \
             python3-pyelftools python3-setuptools rsync subversion swig tar unzip \
             wget xsltproc zlib1g-dev zstd
 
@@ -85,10 +85,14 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Add OpenClash package source
+      - name: Download OpenClash APK
         run: |
-          chmod +x scripts/clone_openclash.sh
-          ./scripts/clone_openclash.sh openwrt "${OPENCLASH_REF}"
+          mkdir -p openwrt/files/root
+          apk_url="$(curl -fsSL https://api.github.com/repos/vernesong/OpenClash/releases/latest | jq -r '.assets[] | select(.name | endswith(\".apk\")) | .browser_download_url' | head -n 1)"
+          test -n "${apk_url}"
+          test "${apk_url}" != "null"
+          curl -fL "${apk_url}" -o openwrt/files/root/luci-app-openclash.apk
+          ls -lh openwrt/files/root/luci-app-openclash.apk
 
       - name: Copy custom files
         run: |

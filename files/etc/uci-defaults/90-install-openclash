@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+APK_PATH="/root/luci-app-openclash.apk"
+
+if [ -f "${APK_PATH}" ] && ! apk info -e luci-app-openclash >/dev/null 2>&1; then
+  apk add --allow-untrusted --force-overwrite --clean-protected "${APK_PATH}"
+fi
+
+rm -f "${APK_PATH}"
+
+exit 0
