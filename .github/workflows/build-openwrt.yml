@@ -1,0 +1,134 @@
+name: Build EasePi R1 Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_tag:
+        description: OpenWrt git tag
+        required: true
+        default: v25.12.0
+      openclash_ref:
+        description: OpenClash git ref
+        required: true
+        default: master
+      rootfs_partsize:
+        description: RootFS partition size in MB
+        required: true
+        default: "1024"
+      extra_packages:
+        description: Extra package names, separated by spaces
+        required: false
+        default: ""
+      remove_packages:
+        description: Packages to remove, separated by spaces
+        required: false
+        default: ""
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-openwrt.yml"
+      - "config/**"
+      - "files/**"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      OPENWRT_TAG: ${{ github.event.inputs.openwrt_tag || 'v25.12.0' }}
+      OPENCLASH_REF: ${{ github.event.inputs.openclash_ref || 'master' }}
+      ROOTFS_PARTSIZE: ${{ github.event.inputs.rootfs_partsize || '1024' }}
+      EXTRA_PACKAGES: ${{ github.event.inputs.extra_packages || '' }}
+      REMOVE_PACKAGES: ${{ github.event.inputs.remove_packages || '' }}
+      TZ: Asia/Shanghai
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo docker image prune -af || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bzip2 ccache clang curl file flex g++ gawk gcc-multilib \
+            gettext git libelf-dev libncurses-dev libssl-dev patch python3 \
+            python3-pyelftools python3-setuptools rsync subversion swig tar unzip \
+            wget xsltproc zlib1g-dev zstd
+
+      - name: Restore dl cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ${{ runner.os }}-openwrt-dl-${{ env.OPENWRT_TAG }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-dl-
+
+      - name: Clone OpenWrt source
+        run: |
+          git clone --depth 1 --branch "${OPENWRT_TAG}" https://git.openwrt.org/openwrt/openwrt.git openwrt
+
+      - name: Update and install feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Add OpenClash package source
+        run: |
+          chmod +x scripts/clone_openclash.sh
+          ./scripts/clone_openclash.sh openwrt "${OPENCLASH_REF}"
+
+      - name: Copy custom files
+        run: |
+          mkdir -p openwrt/files
+          rsync -a files/ openwrt/files/
+
+      - name: Prepare .config
+        run: |
+          chmod +x scripts/prepare_config.sh
+          ./scripts/prepare_config.sh openwrt config/easepi-r1.seed
+
+      - name: Expand defconfig
+        working-directory: openwrt
+        run: |
+          make defconfig
+          grep -E 'CONFIG_TARGET_|CONFIG_PACKAGE_luci-app-openclash|CONFIG_TARGET_ROOTFS_PARTSIZE' .config
+
+      - name: Download sources
+        working-directory: openwrt
+        run: |
+          make download -j"$(nproc)"
+
+      - name: Build firmware
+        working-directory: openwrt
+        run: |
+          make -j"$(nproc)" || make -j1 V=s
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp openwrt/.config artifacts/
+          find openwrt/bin/targets/rockchip/armv8 -maxdepth 1 -type f \
+            \( -name '*.img.gz' -o -name '*.itb' -o -name '*.manifest' -o -name 'sha256sums' -o -name 'profiles.json' -o -name 'config.buildinfo' -o -name 'feeds.buildinfo' -o -name 'version.buildinfo' \) \
+            -exec cp {} artifacts/ \;
+          sha256sum artifacts/* > artifacts/sha256sums
+          ls -lah artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: easepi-r1-openwrt-${{ env.OPENWRT_TAG }}
+          path: artifacts/
+          if-no-files-found: error
