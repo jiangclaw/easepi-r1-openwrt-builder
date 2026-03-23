@@ -63,7 +63,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential bzip2 ccache clang curl file flex g++ gawk gcc-multilib \
-            gettext git jq libelf-dev libncurses-dev libssl-dev patch python3 \
+            gettext git libelf-dev libncurses-dev libssl-dev patch python3 \
             python3-pyelftools python3-setuptools rsync subversion swig tar unzip \
             wget xsltproc zlib1g-dev zstd
 
@@ -88,10 +88,14 @@ jobs:
       - name: Download OpenClash APK
         run: |
           mkdir -p openwrt/files/root
-          apk_url="$(curl -fsSL https://api.github.com/repos/vernesong/OpenClash/releases/latest | jq -r '.assets[] | select(.name | endswith(\".apk\")) | .browser_download_url' | head -n 1)"
-          test -n "${apk_url}"
-          test "${apk_url}" != "null"
-          curl -fL "${apk_url}" -o openwrt/files/root/luci-app-openclash.apk
+          rm -rf /tmp/openclash-package
+          git clone --depth 1 --branch package https://github.com/vernesong/OpenClash.git /tmp/openclash-package
+          case "${OPENCLASH_REF}" in
+            dev) apk_source="$(find /tmp/openclash-package/dev -maxdepth 1 -type f -name '*.apk' | head -n 1)" ;;
+            *) apk_source="$(find /tmp/openclash-package/master -maxdepth 1 -type f -name '*.apk' | head -n 1)" ;;
+          esac
+          test -n "${apk_source}"
+          cp "${apk_source}" openwrt/files/root/luci-app-openclash.apk
           ls -lh openwrt/files/root/luci-app-openclash.apk
 
       - name: Copy custom files
