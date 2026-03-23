@@ -2,16 +2,16 @@
 
 为 `LinkEase EasePi R1` 生成带 `OpenClash` 的 `OpenWrt 25.12` 固件。
 
-这个仓库采用 `GitHub Actions` 远程构建，默认直接从官方 `OpenWrt v25.12.0` 源码编译，并把 `OpenClash` 源码包并入固件，而不是在首次开机后再补装。
+这个仓库采用 `GitHub Actions` 远程构建，默认使用官方 `OpenWrt ImageBuilder` 生成 `EasePi R1` 固件，并将 `OpenClash APK` 随镜像打包，在首次开机时自动离线安装。
 
 ## 方案概览
 
 - 目标设备：`LinkEase EasePi R1`
 - OpenWrt 基线：`v25.12.0`
 - OpenClash 来源：`https://github.com/vernesong/OpenClash`
-- 构建方式：`GitHub Actions` 远程完整源码编译
+- 构建方式：`GitHub Actions` + 官方 `ImageBuilder`
 
-之所以不用本地编译，是因为 OpenWrt 官方构建链默认要求 Linux 主机；而 GitHub Actions 的 Ubuntu Runner 能稳定满足编译条件。
+之所以不用本地编译，是因为 OpenWrt 官方构建链默认要求 Linux 主机；而 GitHub Actions 的 Ubuntu Runner 能稳定满足编译条件。当前方案使用 `ImageBuilder`，比完整源码编译更快，也更适合“官方设备 + 预装少量定制内容”的场景。
 
 ## 仓库结构
 
@@ -19,10 +19,6 @@
   远程构建工作流
 - `config/easepi-r1.seed`
   设备与预装包的种子配置
-- `scripts/clone_openclash.sh`
-  稀疏拉取 OpenClash 源码包
-- `scripts/prepare_config.sh`
-  根据输入参数生成最终 `.config`
 - `files/`
   预留给你放自定义文件和初始化脚本
 
@@ -30,7 +26,6 @@
 
 - `luci`
 - `luci-ssl`
-- `luci-app-openclash`
 - `dnsmasq-full`
 - `bash`
 - `curl`
@@ -45,8 +40,9 @@
 
 说明：
 
-- `OpenClash` 会进固件镜像。
-- `Mihomo` 内核二进制默认不直接打进镜像，因为它有单独的版本节奏，且 OpenClash 本身支持在界面里更新。这样能减少因为内核版本漂移导致的固件重编。
+- `OpenClash APK` 会打进固件镜像的 `/root/luci-app-openclash.apk`
+- 设备首次启动时，`files/etc/uci-defaults/90-install-openclash` 会自动离线安装 OpenClash
+- `Mihomo` 内核二进制默认不直接打进镜像，因为它有单独的版本节奏，且 OpenClash 本身支持在界面里更新。这样能减少因为内核版本漂移导致的重构建
 
 ## 如何触发构建
 
@@ -65,19 +61,19 @@
 
 ## 产物
 
-工作流会上传这些产物：
+工作流会上传这些产物，并在构建成功时自动发布到 GitHub Releases：
 
 - `*-squashfs-sysupgrade.img.gz`
 - `*-ext4-sysupgrade.img.gz`
 - `sha256sums`
 - 最终 `.config`
-- 构建 manifest
+- `build.log`
+- 构建 manifest / buildinfo
 
 ## 后续可选增强
 
 - 把自定义网络配置放到 `files/etc/config/`
 - 把初始化脚本放到 `files/etc/uci-defaults/`
-- 增加 `release` 工作流，把产物自动发到 GitHub Releases
 - 增加 `cache` 和自定义 feed
 
 ## 已确认的上游依据
@@ -86,4 +82,3 @@
   `https://downloads.openwrt.org/releases/25.12.0/targets/rockchip/armv8/`
 - OpenClash 仓库：
   `https://github.com/vernesong/OpenClash`
-

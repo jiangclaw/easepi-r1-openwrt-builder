@@ -33,7 +33,7 @@ on:
       - "scripts/**"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -124,3 +124,13 @@ jobs:
           name: easepi-r1-openwrt-${{ env.OPENWRT_TAG }}
           path: artifacts/
           if-no-files-found: warn
+
+      - name: Publish release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: easepi-r1-${{ env.OPENWRT_TAG }}
+          name: EasePi R1 ${{ env.OPENWRT_TAG }}
+          generate_release_notes: true
+          files: |
+            artifacts/*
